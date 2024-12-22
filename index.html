@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Heliosphere Visualization</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; font-family: Arial, sans-serif; }
+        #renderCanvas { width: 100vw; height: 100vh; display: block; }
+        #controls { position: absolute; top: 10px; left: 10px; z-index: 100; color: white; }
+        #loading { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); color: white; display: none; }
+        #disclaimer {
+            position: absolute;
+            bottom: 20px;
+            color: grey;
+            background-color: rgba(0, 0, 200, 0.2);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+            font-size: small;
+            margin-left: 20px;
+        }
+        #loadButton {
+            background-color: green;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+            margin-top: 5px;
+        }
+        #loadButton:hover {
+            background-color: darkgreen;
+        }
+        #loadButton.disabled {
+            background-color: grey;
+            cursor: not-allowed;
+        }
+        #lmsalButton {
+            background-color: lightblue;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+        #sdoButton {
+            background-color: lightyellow;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+    </style>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+</head>
+<body>
+    <div id="controls">
+        <h3>3D Plasma Density</h3><br>
+        <span id="stepDisplay"></span><br>
+        <button id="loadButton">Load Images</button><br>
+        <button id="lmsalButton">LMSAL</button><br>
+        <button id="sdoButton">SDO</button>
+    </div>
+    <div id="loading">Just a moment please</div>
+    <canvas id="renderCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById("renderCanvas");
+        const engine = new BABYLON.Engine(canvas, true);
+        let scene, camera, sunObject = null, circularMesh = null, segmentMeshes = [];
+        const loadingIndicator = document.getElementById("loading");
+
+        function createScene() {
+            scene = new BABYLON.Scene(engine);
+            scene.clearColor = new BABYLON.Color3(0, 0, 0);
+
+            camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 6.15, Math.PI / 2.15, 6, new BABYLON.Vector3(0, 0, 0), scene);
+            camera.attachControl(canvas, true);
+            camera.lowerRadiusLimit = 1;
+            camera.upperRadiusLimit = 18;
+
+            // Enable touch controls for mobile devices
+            camera.inputs.removeByType("ArcRotateCameraPointersInput");
+            const touchInput = new BABYLON.ArcRotateCameraPointersInput();
+            camera.inputs.add(touchInput);
+
+            return scene;
+        }
+
+        function createEarthSphere() {
+            const earthMesh = BABYLON.MeshBuilder.CreateSphere("earth", { diameter: 0.09 }, scene);
+            const earthMaterial = new BABYLON.PBRMaterial("earthMaterial", scene);
+            const earthTexture = new BABYLON.Texture("suncache/bluemarble2.jpg", scene);
+            earthMaterial.albedoTexture = earthTexture;
+            earthMaterial.albedoColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+            earthMaterial.emissiveTexture = earthTexture;
+            earthMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            earthMaterial.emissiveIntensity = 2;
+            earthMesh.material = earthMaterial;
+            earthMesh.receiveShadows = false;
+            earthMesh.position = new BABYLON.Vector3(1.5, 0, 0);
+            earthMesh.rotation.x = Math.PI;
+        }
+
+        function createSunObject(imagePath) {
+            if (sunObject) sunObject.dispose();
+            const sunTexture = new BABYLON.Texture(imagePath, scene, false, false, BABYLON.Texture.NEAREST_SAMPLINGMODE);
+            sunTexture.onLoadObservable.add(() => {
+                sunObject = BABYLON.MeshBuilder.CreateDisc("sunObject", { radius: 0.25, tessellation: 64 }, scene);
+                const sunMaterial = new BABYLON.StandardMaterial("sunMaterial", scene);
+                sunMaterial.emissiveTexture = sunTexture;
+                sunObject.material = sunMaterial;
+                sunObject.position = new BABYLON.Vector3(0, 0, 0);
+                sunObject.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+            });
+            sunTexture.onErrorObservable.add((texture, error) => {
+                console.error("Failed to load sun texture.", error);
+            });
+        }
+
+        async function loadImageToCanvas(imageUrl) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    ctx.drawImage(img, 0, 0);
+                    resolve({ img, ctx });
+                };
+                img.onerror = reject;
+                img.src = imageUrl;
+            });
+        }
+
+        function processImage(ctx, centerX, centerY, radius, isCircular, sunRotationAngle) {
+            const positions = [];
+            const colors = [];
+            const angleStep = 0.02;
+            const radiusStep = 2;
+            const darkBlueThreshold = 50;
+            const sunRadiusPx = 8;
+            const earthPosX = 1.5;
+            const earthPosY = 0;
+            const earthPosZ = 0;
+            const earthRadius3D = 0.09;
+
+            const earthDotCircle = { x: 275, y: 184, radius: 5 };
+            const earthDotSegment = { x: 430, y: 184, radius: 5 };
+
+            const startAngle = isCircular ? 0 : -Math.PI / 3;
+            const endAngle = isCircular ? Math.PI * 2 : Math.PI / 3;
+
+            for (let angle = startAngle; angle <= endAngle; angle += angleStep) {
+                for (let r = 0; r < radius; r += radiusStep) {
+                    const x = centerX + r * Math.cos(angle);
+                    const y = centerY + r * Math.sin(angle);
+
+                    const distanceToSunCenter = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+                    if (distanceToSunCenter <= sunRadiusPx) continue;
+
+                    if (!isCircular) {
+                        const distanceToEarthDotSegment = Math.sqrt(Math.pow(x - earthDotSegment.x, 2) + Math.pow(y - earthDotSegment.y, 2));
+                        if (distanceToEarthDotSegment <= earthDotSegment.radius) continue;
+                    }
+
+                    if (isCircular) {
+                        const distanceToEarthDotCircle = Math.sqrt(Math.pow(x - earthDotCircle.x, 2) + Math.pow(y - earthDotCircle.y, 2));
+                        if (distanceToEarthDotCircle <= earthDotCircle.radius) continue;
+                    }
+
+                    if (x >= 0 && x < ctx.canvas.width && y >= 0 && y < ctx.canvas.height) {
+                        const data = ctx.getImageData(x, y, 1, 1).data;
+                        const red = data[0], green = data[1], blue = data[2];
+
+                        if (blue > darkBlueThreshold && blue > Math.max(red, green)) {
+                            continue;
+                        }
+
+                        const unrotatedX = r * Math.cos(angle);
+                        const unrotatedY = r * Math.sin(angle);
+                        const finalX = unrotatedX * Math.cos(sunRotationAngle) - unrotatedY * Math.sin(sunRotationAngle);
+                        const finalZ = unrotatedX * Math.sin(sunRotationAngle) + unrotatedY * Math.cos(sunRotationAngle);
+
+                        const distanceToEarth = Math.sqrt(Math.pow(finalX - earthPosX, 2) + Math.pow(earthPosY, 2) + Math.pow(finalZ - earthPosZ, 2));
+                        if (distanceToEarth <= earthRadius3D) {
+                            continue;
+                        }
+
+                        const fuzziness = 0.1;
+                        positions.push((finalX / 100) * (1 + (Math.random() - 0.5) * fuzziness), 0, (finalZ / 100) * (1 + (Math.random() - 0.5) * fuzziness));
+                        colors.push(red / 255, green / 255, blue / 255, 1);
+                    }
+                }
+            }
+
+            return { positions, colors };
+        }
+
+        function createParticleSystem(positions, colors, name, scale = 2) {
+            const pointCloud = new BABYLON.PointsCloudSystem(name, 1, scene);
+            pointCloud.particleTexture = new BABYLON.Texture("https://www.babylonjs-playground.com/textures/flare.png", scene);
+
+            pointCloud.addPoints(positions.length / 3, (particle, i) => {
+                particle.position = new BABYLON.Vector3(
+                    positions[i * 3] * scale,
+                    positions[i * 3 + 1] * scale,
+                    positions[i * 3 + 2] * scale
+                );
+                particle.color = new BABYLON.Color4(
+                    colors[i * 4],
+                    colors[i * 4 + 1],
+                    colors[i * 4 + 2],
+                    colors[i * 4 + 3]
+                );
+            });
+
+            return pointCloud.buildMeshAsync();
+        }
+
+        async function fetchImagesFromDirectory() {
+            try {
+                const response = await fetch('list-images.php');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+
+                const imageList = await response.json();
+
+                if (!Array.isArray(imageList)) {
+                    throw new Error("Invalid JSON response: expected an array");
+                }
+
+                const imageFiles = imageList.filter(imageName => imageName.startsWith('enlil')).map(imageName => `suncache/${imageName}`);
+                imageFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+                console.log(`Loaded ${imageFiles.length} files`);
+
+                return Promise.all(imageFiles.map(imageUrl => loadImageToCanvas(imageUrl)));
+            } catch (error) {
+                console.error("Error fetching images:", error);
+                throw error;
+            }
+        }
+
+        function interpolateMissingData(images, intervalMinutes) {
+            const interpolatedImages = [];
+            const intervalMillis = intervalMinutes * 60 * 1000;
+
+            for (let i = 0; i < images.length - 1; i++) {
+                interpolatedImages.push(images[i]);
+
+                const currentTimestamp = new Date(images[i].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1]);
+                const nextTimestamp = new Date(images[i + 1].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1]);
+                const timeDiff = nextTimestamp - currentTimestamp;
+
+                if (timeDiff > intervalMillis) {
+                    const numMissing = Math.floor(timeDiff / intervalMillis) - 1;
+
+                    for (let j = 1; j <= numMissing; j++) {
+                        const interpolatedTimestamp = new Date(currentTimestamp.getTime() + j * intervalMillis);
+                        const interpolatedImage = interpolateImage(images[i], images[i + 1], j / (numMissing + 1));
+                        interpolatedImages.push({ img: interpolatedImage, timestamp: interpolatedTimestamp });
+                    }
+                }
+            }
+
+            interpolatedImages.push(images[images.length - 1]);
+            return interpolatedImages;
+        }
+
+        function interpolateImage(image1, image2, t) {
+            return new Promise((resolve) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = image1.img.width;
+                canvas.height = image1.img.height;
+                const ctx = canvas.getContext('2d');
+
+                ctx.globalAlpha = 1 - t;
+                ctx.drawImage(image1.img, 0, 0);
+                ctx.globalAlpha = t;
+                ctx.drawImage(image2.img, 0, 0);
+
+                resolve(canvas);
+            });
+        }
+
+        async function processImages(images) {
+            const presentTimestamp = new Date("2024-12-22T02:00:00Z");
+
+            const circleCenterX = 202;
+            const circleCenterY = 184;
+            const circleDiameter = 250;
+            const circleRadius = circleDiameter / 2;
+
+            const segmentCenterX = 358;
+            const segmentCenterY = 184;
+            const segmentRadius = 125;
+
+            let presentIndex = -1;
+            let minTimeDiff = Infinity;
+
+            for (let i = 0; i < images.length; i++) {
+                const timestampStr = images[i].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1];
+                const timestamp = new Date(Date.UTC(
+                    parseInt(timestampStr.substr(0, 4)),
+                    parseInt(timestampStr.substr(4, 2)) - 1,
+                    parseInt(timestampStr.substr(6, 2)),
+                    parseInt(timestampStr.substr(9, 2)),
+                    parseInt(timestampStr.substr(11, 2)),
+                    parseInt(timestampStr.substr(13, 2))
+                ));
+
+                const timeDiff = Math.abs(timestamp - presentTimestamp);
+
+                if (timeDiff < minTimeDiff) {
+                    minTimeDiff = timeDiff;
+                    presentIndex = i;
+                }
+            }
+
+            if (presentIndex === -1) {
+                console.error("Present timestamp not found in the images");
+                return;
+            }
+
+            images = interpolateMissingData(images, 60);
+
+            if (circularMesh) circularMesh.dispose();
+            segmentMeshes.forEach(mesh => mesh.dispose());
+            segmentMeshes = [];
+
+            console.log(`Processing ${images.length} images`);
+
+            const { ctx: circularCtx } = images[presentIndex];
+            const circularData = processImage(circularCtx, circleCenterX, circleCenterY, circleRadius, true, 0);
+            createParticleSystem(circularData.positions, circularData.colors, "circularCloud", 2).then(mesh => {
+                mesh.rotation.x = Math.PI;
+                circularMesh = mesh;
+                console.log("Circular view created for the present moment");
+            });
+
+            const sunRotationPerImage = 0.57 * (Math.PI / 180);
+            const scaleFactor = 1.002;
+
+            for (let i = 0; i < images.length; i++) {
+                if (i === presentIndex) continue;
+
+                const { ctx: segmentCtx } = images[i];
+                const segmentData = processImage(segmentCtx, segmentCenterX, segmentCenterY, segmentRadius, false, 0);
+
+                createParticleSystem(segmentData.positions, segmentData.colors, `segmentCloud_${i}`, 2).then(mesh => {
+                    mesh.rotation.x = -Math.PI / 2;
+
+                    if (i < presentIndex) {
+                        const timeDiff = presentIndex - i;
+                        mesh.rotation.y = -timeDiff * sunRotationPerImage;
+                        mesh.scaling = new BABYLON.Vector3(scaleFactor ** timeDiff, scaleFactor ** timeDiff, scaleFactor ** timeDiff);
+                    } else {
+                        const timeDiff = i - presentIndex;
+                        mesh.rotation.y = timeDiff * sunRotationPerImage;
+                    }
+
+                    segmentMeshes.push(mesh);
+                    console.log(`Segment view ${i} created and positioned at its own azimuth`);
+                });
+            }
+
+            createEarthSphere();
+            document.getElementById('stepDisplay').textContent = `${images.length} hours processed. Click and drag to explore`;
+
+            loadingIndicator.style.display = 'none';
+        }
+
+        scene = createScene();
+
+        engine.runRenderLoop(() => {
+            scene.render();
+        });
+
+        window.addEventListener('resize', () => {
+            engine.resize();
+        });
+
+        document.getElementById('loadButton').addEventListener('click', function() {
+            loadingIndicator.style.display = 'block';
+            document.getElementById('loadButton').classList.add('disabled');
+            fetchImagesFromDirectory().then(images => {
+                processImages(images);
+            }).catch(error => {
+                console.error("Error processing images:", error);
+                loadingIndicator.style.display = 'none';
+            });
+        });
+
+        document.getElementById('lmsalButton').addEventListener('click', function() {
+            createSunObject('suncache/lmsal_sun.jpg');
+        });
+
+        document.getElementById('sdoButton').addEventListener('click', function() {
+            createSunObject('suncache/nasa_sdo_sun.jpg');
+        });
+
+        createSunObject('suncache/lmsal_sun.jpg');
+    </script>
+    <div id="disclaimer">This is an experiment for fun only - based on NASA ENLIL Spiral, no promises implied.<br><sub>Copyright</sub><sup>&copy;</sup><sub>OMDESIGN 2024 All rights reserved</sub></div>
+</body>
+</html>
