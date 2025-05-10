@@ -85,7 +85,6 @@
             camera.lowerRadiusLimit = 1;
             camera.upperRadiusLimit = 18;
 
-            // Enable touch controls for mobile devices
             camera.inputs.removeByType("ArcRotateCameraPointersInput");
             const touchInput = new BABYLON.ArcRotateCameraPointersInput();
             camera.inputs.add(touchInput);
@@ -127,6 +126,7 @@
         async function loadImageToCanvas(imageUrl) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
+                img.crossOrigin = "anonymous";
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     canvas.width = img.width;
@@ -135,7 +135,7 @@
                     ctx.drawImage(img, 0, 0);
                     resolve({ img, ctx });
                 };
-                img.onerror = reject;
+                img.onerror = () => reject(new Error(`Failed to load image: ${imageUrl}`));
                 img.src = imageUrl;
             });
         }
@@ -228,22 +228,31 @@
         async function fetchImagesFromDirectory() {
             try {
                 const response = await fetch('list-images.php');
-
                 if (!response.ok) {
                     throw new Error(`HTTP error! Status: ${response.status}`);
                 }
 
                 const imageList = await response.json();
-
                 if (!Array.isArray(imageList)) {
                     throw new Error("Invalid JSON response: expected an array");
                 }
 
-                const imageFiles = imageList.filter(imageName => imageName.startsWith('enlil')).map(imageName => `suncache/${imageName}`);
-                imageFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                const imageFiles = imageList
+                    .filter(imageName => imageName.toLowerCase().includes('enlil'))
+                    .map(imageName => `suncache/${imageName}`);
 
-                console.log(`Loaded ${imageFiles.length} files`);
+                imageFiles.sort((a, b) => {
+                    const getDate = (filename) => {
+                        const match = filename.match(/Dec\s+(\d+)\s+2024(?:\s+\((\d+)\))?/i);
+                        if (!match) return new Date(0);
+                        const day = parseInt(match[1]);
+                        const sequence = match[2] ? parseInt(match[2]) : 0;
+                        return new Date(2024, 11, day, sequence); // 11 is December (0-based months)
+                    };
+                    return getDate(a) - getDate(b);
+                });
 
+                console.log(`Loading ${imageFiles.length} files`);
                 return Promise.all(imageFiles.map(imageUrl => loadImageToCanvas(imageUrl)));
             } catch (error) {
                 console.error("Error fetching images:", error);
@@ -251,50 +260,25 @@
             }
         }
 
-        function interpolateMissingData(images, intervalMinutes) {
-            const interpolatedImages = [];
-            const intervalMillis = intervalMinutes * 60 * 1000;
-
-            for (let i = 0; i < images.length - 1; i++) {
-                interpolatedImages.push(images[i]);
-
-                const currentTimestamp = new Date(images[i].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1]);
-                const nextTimestamp = new Date(images[i + 1].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1]);
-                const timeDiff = nextTimestamp - currentTimestamp;
-
-                if (timeDiff > intervalMillis) {
-                    const numMissing = Math.floor(timeDiff / intervalMillis) - 1;
-
-                    for (let j = 1; j <= numMissing; j++) {
-                        const interpolatedTimestamp = new Date(currentTimestamp.getTime() + j * intervalMillis);
-                        const interpolatedImage = interpolateImage(images[i], images[i + 1], j / (numMissing + 1));
-                        interpolatedImages.push({ img: interpolatedImage, timestamp: interpolatedTimestamp });
-                    }
-                }
-            }
-
-            interpolatedImages.push(images[images.length - 1]);
-            return interpolatedImages;
-        }
-
         function interpolateImage(image1, image2, t) {
-            return new Promise((resolve) => {
-                const canvas = document.createElement('canvas');
-                canvas.width = image1.img.width;
-                canvas.height = image1.img.height;
-                const ctx = canvas.getContext('2d');
+            const canvas = document.createElement('canvas');
+            canvas.width = image1.img.width;
+            canvas.height = image1.img.height;
+            const ctx = canvas.getContext('2d');
 
-                ctx.globalAlpha = 1 - t;
-                ctx.drawImage(image1.img, 0, 0);
-                ctx.globalAlpha = t;
-                ctx.drawImage(image2.img, 0, 0);
+            ctx.globalAlpha = 1 - t;
+            ctx.drawImage(image1.img, 0, 0);
+            ctx.globalAlpha = t;
+            ctx.drawImage(image2.img, 0, 0);
 
-                resolve(canvas);
-            });
+            return { img: canvas, ctx: ctx };
         }
 
         async function processImages(images) {
-            const presentTimestamp = new Date("2024-12-22T02:00:00Z");
+            if (images.length === 0) {
+                console.error("No images to process");
+                return;
+            }
 
             const circleCenterX = 202;
             const circleCenterY = 184;
@@ -305,34 +289,7 @@
             const segmentCenterY = 184;
             const segmentRadius = 125;
 
-            let presentIndex = -1;
-            let minTimeDiff = Infinity;
-
-            for (let i = 0; i < images.length; i++) {
-                const timestampStr = images[i].img.src.match(/enlil_com2_\d+_(\d{8}T\d{6})\.jpg/)[1];
-                const timestamp = new Date(Date.UTC(
-                    parseInt(timestampStr.substr(0, 4)),
-                    parseInt(timestampStr.substr(4, 2)) - 1,
-                    parseInt(timestampStr.substr(6, 2)),
-                    parseInt(timestampStr.substr(9, 2)),
-                    parseInt(timestampStr.substr(11, 2)),
-                    parseInt(timestampStr.substr(13, 2))
-                ));
-
-                const timeDiff = Math.abs(timestamp - presentTimestamp);
-
-                if (timeDiff < minTimeDiff) {
-                    minTimeDiff = timeDiff;
-                    presentIndex = i;
-                }
-            }
-
-            if (presentIndex === -1) {
-                console.error("Present timestamp not found in the images");
-                return;
-            }
-
-            images = interpolateMissingData(images, 60);
+            const presentIndex = Math.floor(images.length / 2);
 
             if (circularMesh) circularMesh.dispose();
             segmentMeshes.forEach(mesh => mesh.dispose());
@@ -376,7 +333,6 @@
 
             createEarthSphere();
             document.getElementById('stepDisplay').textContent = `${images.length} hours processed. Click and drag to explore`;
-
             loadingIndicator.style.display = 'none';
         }
 
@@ -398,6 +354,7 @@
             }).catch(error => {
                 console.error("Error processing images:", error);
                 loadingIndicator.style.display = 'none';
+                document.getElementById('loadButton').classList.remove('disabled');
             });
         });
 
