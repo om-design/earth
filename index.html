@@ -89,20 +89,20 @@
             const touchInput = new BABYLON.ArcRotateCameraPointersInput();
             camera.inputs.add(touchInput);
 
+            const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+            light.intensity = 1;
+
             return scene;
         }
 
         function createEarthSphere() {
             const earthMesh = BABYLON.MeshBuilder.CreateSphere("earth", { diameter: 0.09 }, scene);
-            const earthMaterial = new BABYLON.PBRMaterial("earthMaterial", scene);
+            const earthMaterial = new BABYLON.StandardMaterial("earthMaterial", scene);
             const earthTexture = new BABYLON.Texture("suncache/bluemarble2.jpg", scene);
-            earthMaterial.albedoTexture = earthTexture;
-            earthMaterial.albedoColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-            earthMaterial.emissiveTexture = earthTexture;
-            earthMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
-            earthMaterial.emissiveIntensity = 2;
+            earthMaterial.diffuseTexture = earthTexture;
+            earthMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            earthMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.2);
             earthMesh.material = earthMaterial;
-            earthMesh.receiveShadows = false;
             earthMesh.position = new BABYLON.Vector3(1.5, 0, 0);
             earthMesh.rotation.x = Math.PI;
         }
