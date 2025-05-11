@@ -4,7 +4,7 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
 // Define cache directory path relative to this script
-$cacheDir = __DIR__ . '/suncache/';
+$cacheDir = 'suncache/';
 
 // Verify directory exists
 if (!is_dir($cacheDir)) {
@@ -27,9 +27,14 @@ if ($files === false) {
 // Extract just the filenames without the full path
 $fileNames = array_map('basename', $files);
 
-// Set proper JSON content type
+// Log the files found for debugging
+error_log("Files found in cache: " . print_r($fileNames, true));
+
+// Set proper JSON content type and CORS headers
 header('Content-Type: application/json');
 header('Cache-Control: no-cache, must-revalidate');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
 
 // Return the list of files
 echo json_encode($fileNames);

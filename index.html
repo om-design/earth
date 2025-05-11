@@ -90,7 +90,7 @@
             camera.inputs.add(touchInput);
 
             const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-            light.intensity = 1;
+            light.intensity = 0.7;
 
             return scene;
         }
@@ -108,21 +108,25 @@
         }
 
         function createSunObject(imagePath) {
-            if (sunObject) {
-                sunObject.dispose();
-            }
-            
-            const sunMaterial = new BABYLON.StandardMaterial("sunMaterial", scene);
-            const sunTexture = new BABYLON.Texture(imagePath, scene);
-            sunMaterial.emissiveTexture = sunTexture;
-            sunMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-            sunMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-            sunMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            try {
+                if (sunObject) {
+                    sunObject.dispose();
+                }
+                
+                const sunMaterial = new BABYLON.StandardMaterial("sunMaterial", scene);
+                const sunTexture = new BABYLON.Texture(imagePath, scene);
+                sunMaterial.emissiveTexture = sunTexture;
+                sunMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+                sunMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+                sunMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
 
-            sunObject = BABYLON.MeshBuilder.CreateDisc("sunObject", { radius: 0.25, tessellation: 64 }, scene);
-            sunObject.material = sunMaterial;
-            sunObject.position = new BABYLON.Vector3(0, 0, 0);
-            sunObject.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+                sunObject = BABYLON.MeshBuilder.CreateDisc("sunObject", { radius: 0.25, tessellation: 64 }, scene);
+                sunObject.material = sunMaterial;
+                sunObject.position = new BABYLON.Vector3(0, 0, 0);
+                sunObject.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+            } catch (error) {
+                console.error("Error creating sun object:", error);
+            }
         }
 
         async function loadImageToCanvas(imageUrl) {
@@ -133,7 +137,7 @@
                     const canvas = document.createElement('canvas');
                     canvas.width = img.width;
                     canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
                     ctx.drawImage(img, 0, 0);
                     resolve({ img, ctx });
                 };
