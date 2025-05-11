@@ -89,8 +89,9 @@
             const touchInput = new BABYLON.ArcRotateCameraPointersInput();
             camera.inputs.add(touchInput);
 
+            // Add ambient light to ensure objects are visible
             const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-            light.intensity = 0.7;
+            light.intensity = 1.0;
 
             return scene;
         }
@@ -102,9 +103,11 @@
             earthMaterial.diffuseTexture = earthTexture;
             earthMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
             earthMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+            earthMaterial.backFaceCulling = false;
             earthMesh.material = earthMaterial;
             earthMesh.position = new BABYLON.Vector3(1.5, 0, 0);
             earthMesh.rotation.x = Math.PI;
+            return earthMesh;
         }
 
         function createSunObject(imagePath) {
@@ -115,10 +118,11 @@
                 
                 const sunMaterial = new BABYLON.StandardMaterial("sunMaterial", scene);
                 const sunTexture = new BABYLON.Texture(imagePath, scene);
+                sunTexture.hasAlpha = false;
+                sunMaterial.diffuseTexture = sunTexture;
                 sunMaterial.emissiveTexture = sunTexture;
-                sunMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-                sunMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
                 sunMaterial.emissiveColor = new BABYLON.Color3(1, 1, 1);
+                sunMaterial.backFaceCulling = false;
 
                 sunObject = BABYLON.MeshBuilder.CreateDisc("sunObject", { radius: 0.25, tessellation: 64 }, scene);
                 sunObject.material = sunMaterial;
